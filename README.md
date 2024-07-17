@@ -5,18 +5,18 @@ This guide provides an in-depth, step-by-step process for setting up and managin
 ## Table of Contents
 
 1. [Prerequisites](#prerequisites)
-2. [Version Control with GitHub](#1.-version-control-with-github)
-3. [Continuous Integration and Deployment with Jenkins](#2.-continuous-integration-and-deployment-with-jenkins)
-4. [Configuration Management with Ansible](#configuration-management-with-ansible)
-5. [Infrastructure as Code with Terraform](#infrastructure-as-code-with-terraform)
-6. [AWS Cloud Setup](#aws-cloud-setup)
-7. [Load Balancing with NLB and Nginx](#load-balancing-with-nlb-and-nginx)
-8. [Monitoring with Prometheus and Grafana](#monitoring-with-prometheus-and-grafana)
+2. [Version Control with GitHub](#1-version-control-with-github) 
+3. [Continuous Integration and Deployment with Jenkins](#2-continuous-integration-and-deployment-with-jenkins)
+4. [Configuration Management with Ansible](#3-configuration-management-with-ansible)
+5. [Infrastructure as Code with Terraform](#4-infrastructure-as-code-with-terraform)
+6. [AWS Cloud Setup](#5-aws-cloud-setup)
+7. [Load Balancing with NLB and Nginx](#6-load-balancing-with-nlb-and-nginx)
+8. [Monitoring with Prometheus and Grafana](#7-monitoring-with-prometheus-and-grafana)
 9. [Logging with ELK Stack](#logging-with-elk-stack)
-10. [Alerting and Communication with Slack](#alerting-and-communication-with-slack)
-11. [Security Considerations](#security-considerations)
-12. [Backup and Disaster Recovery](#backup-and-disaster-recovery)
-13. [Maintenance and Upgrades](#maintenance-and-upgrades)
+10. [Alerting and Communication with Slack](#8-alerting-and-communication-with-slack)
+11. [Security Considerations](#9-security-considerations)
+12. [Backup and Disaster Recovery](#10-backup-and-disaster-recovery)
+13. [Maintenance and Upgrades](#11-maintenance-and-upgrades)
 
 ## Prerequisites
 
@@ -1117,236 +1117,530 @@ Why it's important: Workspaces allow you to manage multiple environments (e.g., 
 
 For more information on AWS, refer to the [AWS documentation](https://docs.aws.amazon.com/).
 
-## 6. Load Balancing with NLB and Nginx
+## 6. Load Balancing with Network Load Balancer (NLB) and Nginx
 
-1. Use Terraform to create a Network Load Balancer (NLB):
+### 6.1. Understanding Load Balancing
 
-   Add the following to your Terraform configuration:
-   ```hcl
-   resource "aws_lb" "nlb" {
-     name               = "my-nlb"
-     internal           = false
-     load_balancer_type = "network"
-     subnets            = module.vpc.public_subnet_ids
+Load balancing is a critical concept in DevOps that involves distributing network traffic across multiple servers. This practice helps to:
 
-     enable_deletion_protection = false
+- Improve application availability and reliability
+- Increase scalability to handle more users or requests
+- Optimize resource utilization
+- Provide flexibility for maintenance and updates
 
-     tags = {
-       Environment = "staging"
-     }
-   }
+Why it's important: Load balancing ensures that no single server bears too much demand, reducing the risk of poor performance or outages.
 
-   resource "aws_lb_target_group" "http" {
-     name     = "http-tg"
-     port     = 80
-     protocol = "TCP"
-     vpc_id   = module.vpc.vpc_id
-   }
+### 6.2. Types of Load Balancers
 
-   resource "aws_lb_listener" "http" {
-     load_balancer_arn = aws_lb.nlb.arn
-     port              = "80"
-     protocol          = "TCP"
+There are several types of load balancers, but we'll focus on two:
 
-     default_action {
-       type             = "forward"
-       target_group_arn = aws_lb_target_group.http.arn
-     }
-   }
+1. Network Load Balancer (NLB): Operates at the transport layer (Layer 4) of the OSI model, handling TCP and UDP traffic.
+2. Application Load Balancer (ALB): Operates at the application layer (Layer 7), capable of routing HTTP/HTTPS traffic based on content.
+
+In this guide, we'll use an NLB for external traffic distribution and Nginx as an internal load balancer and reverse proxy.
+
+### 6.3. Setting Up a Network Load Balancer (NLB) in AWS
+
+AWS Network Load Balancer is a highly available and scalable load balancing solution.
+
+Steps to set up an NLB:
+
+1. Log into the AWS Management Console
+
+2. Navigate to the EC2 service
+
+3. In the left sidebar, under "Load Balancing", click "Load Balancers"
+
+4. Click "Create Load Balancer"
+
+5. Choose "Network Load Balancer" and click "Create"
+
+6. Configure the NLB:
+   - Name: Give your NLB a name (e.g., "my-nlb")
+   - Scheme: Choose "internet-facing" for external traffic
+   - IP address type: Usually "ipv4"
+   - VPC: Select your VPC
+   - Mappings: Select at least two subnets in different Availability Zones
+
+7. Configure the Listener:
+   - Protocol: TCP
+   - Port: 80 (for HTTP traffic)
+
+8. Configure Routing:
+   - Target group: Create a new target group
+   - Name: Give your target group a name
+   - Protocol: TCP
+   - Port: 80
+   - Register targets: Add your EC2 instances here
+
+9. Review and create the NLB
+
+Here's how you could define this NLB using Terraform:
+
+```hcl
+resource "aws_lb" "my_nlb" {
+  name               = "my-nlb"
+  internal           = false
+  load_balancer_type = "network"
+  subnets            = ["subnet-12345678", "subnet-87654321"]
+
+  enable_deletion_protection = false
+
+  tags = {
+    Environment = "production"
+  }
+}
+
+resource "aws_lb_listener" "front_end" {
+  load_balancer_arn = aws_lb.my_nlb.arn
+  port              = "80"
+  protocol          = "TCP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.my_targets.arn
+  }
+}
+
+resource "aws_lb_target_group" "my_targets" {
+  name     = "my-targets"
+  port     = 80
+  protocol = "TCP"
+  vpc_id   = "vpc-0123456789abcdef0"
+}
+
+resource "aws_lb_target_group_attachment" "my_attachment" {
+  target_group_arn = aws_lb_target_group.my_targets.arn
+  target_id        = "i-1234567890abcdef0"
+  port             = 80
+}
+```
+
+Why it's important: The NLB provides a single point of contact for clients and distributes incoming traffic across multiple EC2 instances, improving availability and fault tolerance.
+
+### 6.4. Understanding Nginx as a Load Balancer
+
+Nginx is a versatile web server that can also function as a reverse proxy and load balancer. In our setup, Nginx will distribute traffic among application servers.
+
+Key Nginx load balancing features:
+- Distributes client requests or network load efficiently across multiple servers
+- Provides high availability and reliability by sending requests only to servers that are online
+- Provides the flexibility to easily add or remove servers from the resource pool
+
+### 6.5. Installing and Configuring Nginx
+
+1. Install Nginx on your EC2 instance:
+   ```
+   sudo apt update
+   sudo apt install nginx
    ```
 
-2. Configure Nginx as a reverse proxy on your EC2 instances:
+2. Verify Nginx is running:
+   ```
+   sudo systemctl status nginx
+   ```
 
-   Create an Nginx configuration file (roles/nginx/templates/nginx.conf.j2):
+3. Create a new Nginx configuration file:
+   ```
+   sudo nano /etc/nginx/conf.d/load-balancer.conf
+   ```
+
+4. Add the following configuration:
+
+```nginx
+upstream backend {
+    server backend1.example.com;
+    server backend2.example.com;
+    server backend3.example.com;
+}
+
+server {
+    listen 80;
+    server_name example.com;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+This configuration does the following:
+- Defines an upstream group named "backend" with three servers
+- Creates a server block that listens on port 80
+- Proxies requests to the backend servers, distributing the load
+
+5. Test the Nginx configuration:
+   ```
+   sudo nginx -t
+   ```
+
+6. If the test is successful, reload Nginx:
+   ```
+   sudo systemctl reload nginx
+   ```
+
+Why it's important: Nginx as a load balancer provides fine-grained control over traffic distribution and can handle a large number of concurrent connections efficiently.
+
+### 6.6. Load Balancing Algorithms
+
+Nginx supports several load balancing algorithms:
+
+1. Round Robin (default): Requests are distributed evenly across servers.
    ```nginx
-   server {
-       listen 80;
-       server_name _;
-
-       location / {
-           proxy_pass http://localhost:8080;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-           proxy_set_header X-Forwarded-Proto $scheme;
-       }
+   upstream backend {
+       server backend1.example.com;
+       server backend2.example.com;
    }
    ```
 
-   Update your Ansible nginx role to use this template.
-
-3. Implement health checks for your application:
-
-   Add a health check endpoint to your Java application:
-   ```java
-   @RestController
-   public class HealthController {
-       @GetMapping("/health")
-       public ResponseEntity<String> health() {
-           return ResponseEntity.ok("OK");
-       }
-   }
-   ```
-
-   Update the Terraform configuration to use this health check:
-   ```hcl
-   resource "aws_lb_target_group" "http" {
-     # ...
-     health_check {
-       path                = "/health"
-       protocol            = "HTTP"
-       interval            = 30
-       timeout             = 10
-       healthy_threshold   = 2
-       unhealthy_threshold = 2
-     }
-   }
-   ```
-
-4. Set up SSL termination at the Nginx level:
-
-   Update your Nginx configuration to include SSL:
+2. Least Connections: Request is sent to the server with the least active connections.
    ```nginx
-   server {
-       listen 80;
-       server_name yourdomain.com;
-       return 301 https://$server_name$request_uri;
-   }
-
-   server {
-       listen 443 ssl;
-       server_name yourdomain.com;
-
-       ssl_certificate /etc/letsencrypt/live/yourdomain.com/fullchain.pem;
-       ssl_certificate_key /etc/letsencrypt/live/yourdomain.com/privkey.pem;
-
-       location / {
-           proxy_pass http://localhost:8080;
-           proxy_set_header Host $host;
-           proxy_set_header X-Real-IP $remote_addr;
-           proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-           proxy_set_header X-Forwarded-Proto $scheme;
-       }
+   upstream backend {
+       least_conn;
+       server backend1.example.com;
+       server backend2.example.com;
    }
    ```
 
-   Use Certbot to obtain and renew SSL certificates:
+3. IP Hash: Requests from the same IP address are sent to the same server.
+   ```nginx
+   upstream backend {
+       ip_hash;
+       server backend1.example.com;
+       server backend2.example.com;
+   }
    ```
-   sudo apt-get update
-   sudo apt-get install certbot python3-certbot-nginx
-   sudo certbot --nginx -d yourdomain.com
+
+4. Weighted: Distribute requests based on server weights.
+   ```nginx
+   upstream backend {
+       server backend1.example.com weight=3;
+       server backend2.example.com;
+   }
    ```
+
+Why it's important: Different algorithms suit different use cases. Choosing the right algorithm can significantly improve your application's performance and resource utilization.
+
+### 6.7. Health Checks
+
+Both NLB and Nginx support health checks to ensure traffic is only sent to healthy servers.
+
+For NLB, you can configure health checks in the target group settings:
+- Protocol: Usually HTTP or TCP
+- Path: For HTTP checks, the path to check (e.g., "/health")
+- Healthy threshold: Number of consecutive successful checks before marking an instance as healthy
+- Unhealthy threshold: Number of consecutive failed checks before marking an instance as unhealthy
+- Timeout: Time to wait for a response
+- Interval: Time between checks
+
+For Nginx, you can use the `health_check` directive:
+
+```nginx
+upstream backend {
+    server backend1.example.com;
+    server backend2.example.com;
+
+    health_check interval=10 fails=3 passes=2;
+}
+```
+
+Why it's important: Health checks ensure that traffic is only sent to functioning servers, improving the reliability of your application.
+
+### 6.8. SSL/TLS Termination
+
+For secure communication, you should use SSL/TLS. The NLB can pass through encrypted traffic, which Nginx can then decrypt.
+
+1. Obtain an SSL certificate (you can use AWS Certificate Manager for free certificates)
+
+2. Update your NLB listener to use TCP port 443
+
+3. Update your Nginx configuration:
+
+```nginx
+server {
+    listen 443 ssl;
+    server_name example.com;
+
+    ssl_certificate /path/to/cert.pem;
+    ssl_certificate_key /path/to/cert.key;
+
+    location / {
+        proxy_pass http://backend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
+Why it's important: SSL/TLS encryption protects data in transit, which is crucial for security and often a compliance requirement.
+
+### 6.9. Monitoring and Logging
+
+Monitoring your load balancers is crucial for maintaining a healthy system.
+
+For NLB:
+- Use Amazon CloudWatch to monitor metrics like ActiveFlowCount, ConsumedLCUs, and HealthyHostCount
+- Enable access logs to track detailed information about requests
+
+For Nginx:
+- Monitor Nginx process status and resource usage
+- Use Nginx access and error logs for detailed request information
+- Consider using tools like Prometheus and Grafana for advanced monitoring
+
+Example Nginx logging configuration:
+
+```nginx
+http {
+    log_format main '$remote_addr - $remote_user [$time_local] "$request" '
+                    '$status $body_bytes_sent "$http_referer" '
+                    '"$http_user_agent" "$http_x_forwarded_for"';
+
+    access_log /var/log/nginx/access.log main;
+    error_log /var/log/nginx/error.log;
+}
+```
+
+Why it's important: Proper monitoring and logging help you identify and resolve issues quickly, ensuring high availability and performance of your applications.
+
+Load balancing with NLB and Nginx is a powerful combination for improving the availability, scalability, and performance of your applications. The NLB provides a highly available entry point for your traffic, while Nginx offers fine-grained control over how that traffic is distributed to your application servers.
 
 For more information on AWS NLB, refer to the [Network Load Balancer documentation](https://docs.aws.amazon.com/elasticloadbalancing/latest/network/introduction.html).
 
 ## 7. Monitoring with Prometheus and Grafana
 
-1. Install Prometheus on a dedicated EC2 instance:
+### 7.1. Understanding Monitoring in DevOps
 
-   Create a Terraform configuration for the Prometheus instance:
-   ```hcl
-   resource "aws_instance" "prometheus" {
-     ami           = "ami-0c55b159cbfafe1f0"
-     instance_type = "t2.micro"
-     subnet_id     = module.vpc.private_subnet_ids[0]
-     key_name      = "your-key-pair"
+Monitoring is a critical aspect of DevOps that involves continuously observing and tracking the performance and health of your systems, applications, and infrastructure. Effective monitoring helps you:
 
-     tags = {
-       Name = "Prometheus"
-     }
-   }
+- Detect and diagnose problems quickly
+- Understand system behavior and performance trends
+- Make data-driven decisions for scaling and optimization
+- Ensure high availability and reliability of your services
+
+Why it's important: Proper monitoring is essential for maintaining the health and performance of your systems, and for quickly identifying and resolving issues before they impact users.
+
+### 7.2. Introduction to Prometheus and Grafana
+
+Prometheus and Grafana are two powerful open-source tools that work together to provide a robust monitoring and visualization solution.
+
+- Prometheus: A monitoring system and time series database that collects and stores metrics.
+- Grafana: A visualization tool that allows you to create dashboards and graphs from various data sources, including Prometheus.
+
+Why use Prometheus and Grafana:
+- Open-source and free to use
+- Highly scalable and reliable
+- Large community and ecosystem
+- Flexible and customizable
+
+### 7.3. Core Concepts of Prometheus
+
+Before we dive into setup, let's understand some key Prometheus concepts:
+
+1. Metrics: Measurements of system attributes over time (e.g., CPU usage, request count)
+2. Labels: Key-value pairs associated with a metric for additional context
+3. Scraping: The process of fetching metrics from monitored targets
+4. PromQL: Prometheus Query Language, used to query and analyze collected metrics
+
+Example of a Prometheus metric with labels:
+```
+http_requests_total{method="GET", endpoint="/api/users"} 3752
+```
+
+### 7.4. Setting Up Prometheus
+
+Let's set up Prometheus to monitor a simple system:
+
+1. Download Prometheus:
+   ```
+   wget https://github.com/prometheus/prometheus/releases/download/v2.30.3/prometheus-2.30.3.linux-amd64.tar.gz
+   tar xvfz prometheus-2.30.3.linux-amd64.tar.gz
+   cd prometheus-2.30.3.linux-amd64/
    ```
 
-   Use Ansible to install and configure Prometheus:
+2. Create a Prometheus configuration file `prometheus.yml`:
    ```yaml
-   - name: Install Prometheus
-     apt:
-       name: prometheus
-       state: present
-       update_cache: yes
+   global:
+     scrape_interval: 15s
 
-   - name: Configure Prometheus
-     template:
-       src: prometheus.yml.j2
-       dest: /etc/prometheus/prometheus.yml
-     notify: Restart Prometheus
-
-   handlers:
-     - name: Restart Prometheus
-       systemd:
-         name: prometheus
-         state: restarted
-   ```
-
-2. Configure Prometheus to scrape metrics from your Java application:
-
-   Add the Micrometer dependency to your `pom.xml`:
-   ```xml
-   <dependency>
-     <groupId>io.micrometer</groupId>
-     <artifactId>micrometer-registry-prometheus</artifactId>
-   </dependency>
-   ```
-
-   Enable Prometheus endpoint in your `application.properties`:
-   ```
-   management.endpoints.web.exposure.include=prometheus
-   ```
-
-   Update Prometheus configuration to scrape your application:
-   ```yaml
    scrape_configs:
-     - job_name: 'spring-actuator'
-       metrics_path: '/actuator/prometheus'
+     - job_name: 'prometheus'
        static_configs:
-         - targets: ['your-app-ip:8080']
+         - targets: ['localhost:9090']
+
+     - job_name: 'node'
+       static_configs:
+         - targets: ['localhost:9100']
    ```
 
-3. Set up Grafana and connect it to Prometheus:
+   This configuration tells Prometheus to:
+   - Scrape metrics every 15 seconds
+   - Collect metrics from itself (on port 9090)
+   - Collect metrics from a Node Exporter (which we'll set up next) on port 9100
 
-   Install Grafana:
-   ```yaml
-   - name: Install Grafana
-     apt:
-       name: grafana
-       state: present
-       update_cache: yes
-
-   - name: Start Grafana
-     systemd:
-       name: grafana-server
-       state: started
-       enabled: yes
+3. Start Prometheus:
+   ```
+   ./prometheus --config.file=prometheus.yml
    ```
 
-   Configure Grafana to use Prometheus as a data source:
-   - Log in to Grafana
-   - Go to Configuration > Data Sources
-   - Add a new Prometheus data source with the Prometheus server URL
+4. Access the Prometheus web interface at `http://localhost:9090`
 
-4. Create dashboards for key metrics (CPU, memory, request rate, error rate):
-   - In Grafana, create a new dashboard
-   - Add panels for key metrics using PromQL queries, e.g.:
-     - CPU Usage: `rate(process_cpu_usage[5m])`
-     - Memory Usage: `jvm_memory_used_bytes`
-     - Request Rate: `rate(http_server_requests_seconds_count[5m])`
-     - Error Rate: `rate(http_server_requests_seconds_count{status="5xx"}[5m])`
+Why it's important: This basic setup allows Prometheus to start collecting metrics from itself, providing a foundation for more complex monitoring scenarios.
 
-5. Set up alerting rules in Prometheus:
+### 7.5. Exporting Metrics with Node Exporter
 
-   Add alert rules to your Prometheus configuration:
+To monitor system metrics (CPU, memory, disk, etc.), we'll use Node Exporter:
+
+1. Download and extract Node Exporter:
+   ```
+   wget https://github.com/prometheus/node_exporter/releases/download/v1.2.2/node_exporter-1.2.2.linux-amd64.tar.gz
+   tar xvfz node_exporter-1.2.2.linux-amd64.tar.gz
+   cd node_exporter-1.2.2.linux-amd64/
+   ```
+
+2. Start Node Exporter:
+   ```
+   ./node_exporter
+   ```
+
+Node Exporter will start and expose metrics on `http://localhost:9100/metrics`
+
+Why it's important: Exporters like Node Exporter allow Prometheus to collect a wide range of system-level metrics, providing comprehensive monitoring of your infrastructure.
+
+### 7.6. Querying Metrics with PromQL
+
+PromQL is Prometheus' query language. Here are some basic query examples:
+
+1. Get the current CPU usage:
+   ```
+   100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+   ```
+
+2. Get the total memory usage:
+   ```
+   node_memory_MemTotal_bytes - node_memory_MemFree_bytes - node_memory_Buffers_bytes - node_memory_Cached_bytes
+   ```
+
+3. Get the number of HTTP requests:
+   ```
+   rate(http_requests_total[5m])
+   ```
+
+You can enter these queries in the Prometheus web interface to see the results.
+
+Why it's important: Understanding PromQL allows you to extract meaningful insights from your metrics and create powerful monitoring rules and alerts.
+
+### 7.7. Setting Up Grafana
+
+Now let's set up Grafana to visualize our Prometheus metrics:
+
+1. Install Grafana:
+   ```
+   sudo apt-get install -y apt-transport-https
+   sudo apt-get install -y software-properties-common wget
+   wget -q -O - https://packages.grafana.com/gpg.key | sudo apt-key add -
+   echo "deb https://packages.grafana.com/oss/deb stable main" | sudo tee -a /etc/apt/sources.list.d/grafana.list
+   sudo apt-get update
+   sudo apt-get install grafana
+   ```
+
+2. Start Grafana:
+   ```
+   sudo systemctl start grafana-server
+   sudo systemctl enable grafana-server
+   ```
+
+3. Access Grafana at `http://localhost:3000` (default credentials: admin/admin)
+
+4. Add Prometheus as a data source:
+   - Click on "Configuration" (gear icon) > "Data Sources"
+   - Click "Add data source"
+   - Select "Prometheus"
+   - Set the URL to `http://localhost:9090`
+   - Click "Save & Test"
+
+Why it's important: Grafana provides a user-friendly interface for creating dashboards and visualizing metrics, making it easier to understand and analyze your monitoring data.
+
+### 7.8. Creating Grafana Dashboards
+
+Let's create a simple dashboard to monitor system resources:
+
+1. Click "+ Create" > "Dashboard"
+2. Click "Add new panel"
+3. In the query editor, enter this PromQL query for CPU usage:
+   ```
+   100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+   ```
+4. Set the panel title to "CPU Usage"
+5. Click "Apply"
+
+Repeat these steps to add panels for memory usage, disk usage, and network traffic.
+
+Example memory usage query:
+```
+100 * (1 - ((node_memory_MemFree_bytes + node_memory_Cached_bytes + node_memory_Buffers_bytes) / node_memory_MemTotal_bytes))
+```
+
+Why it's important: Custom dashboards allow you to visualize the most important metrics for your specific use case, making it easier to monitor system health at a glance.
+
+### 7.9. Setting Up Alerts
+
+Prometheus and Grafana can be configured to send alerts when certain conditions are met:
+
+1. In Prometheus, create an alert rule in `prometheus.yml`:
    ```yaml
+   rule_files:
+     - 'alert.rules'
+
    alerting:
-     rules:
-       - alert: HighCPUUsage
-         expr: process_cpu_usage > 0.8
-         for: 5m
-         labels:
-           severity: warning
-         annotations:
-           summary: "High CPU usage detected"
-           description: "CPU usage is above 80% for 5 minutes"
+     alertmanagers:
+     - static_configs:
+       - targets:
+         - localhost:9093
    ```
+
+2. Create `alert.rules`:
+   ```yaml
+   groups:
+   - name: example
+     rules:
+     - alert: HighCPUUsage
+       expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+       for: 5m
+       labels:
+         severity: warning
+       annotations:
+         summary: High CPU usage detected
+         description: CPU usage is above 80% for more than 5 minutes.
+   ```
+
+3. In Grafana, you can set up alert notifications:
+   - Go to Alerting > Notification channels
+   - Add a new channel (e.g., email, Slack)
+   - In your dashboard, edit a panel and go to the "Alert" tab to set up an alert
+
+Why it's important: Automated alerts ensure that you're immediately notified of potential issues, allowing for quick response and resolution.
+
+### 7.10. Best Practices
+
+1. Monitor key performance indicators (KPIs) relevant to your application
+2. Use labels effectively to add context to your metrics
+3. Keep your dashboards simple and focused
+4. Use recording rules in Prometheus for complex, frequently-used queries
+5. Implement alerting for critical metrics
+6. Regularly review and update your monitoring setup
+7. Use Prometheus' service discovery features for dynamic environments
+8. Implement proper retention and storage policies for your metrics
+
+Monitoring with Prometheus and Grafana provides powerful insights into your systems and applications. By collecting and visualizing metrics, you can ensure the health, performance, and reliability of your infrastructure.
+
+Remember, effective monitoring is an ongoing process. Continuously refine your metrics, dashboards, and alerts based on your evolving needs and insights gained from your monitoring data.
+
 
 For more information on Prometheus and Grafana, refer to their official documentation:
 - [Prometheus Documentation](https://prometheus.io/docs/introduction/overview/)
@@ -1354,101 +1648,273 @@ For more information on Prometheus and Grafana, refer to their official document
 
 ## 8. Logging with ELK Stack
 
-1. Set up Elasticsearch, Logstash, and Kibana on dedicated EC2 instances or use Elastic Cloud:
+### 8.1. Understanding Logging in DevOps
 
-   For self-hosted ELK, create Terraform configurations for each component:
-   ```hcl
-   resource "aws_instance" "elasticsearch" {
-     ami           = "ami-0c55b159cbfafe1f0"
-     instance_type = "t2.medium"
-     subnet_id     = module.vpc.private_subnet_ids[0]
-     key_name      = "your-key-pair"
+Logging is a crucial aspect of DevOps that involves recording events, processes, and data messages generated by applications and systems. Effective logging helps you:
 
-     tags = {
-       Name = "Elasticsearch"
-     }
-   }
+- Troubleshoot issues and debug applications
+- Monitor system health and performance
+- Detect security incidents
+- Comply with regulatory requirements
+- Understand user behavior and system usage patterns
 
-   # Similar configurations for Logstash and Kibana
+Why it's important: Proper logging provides visibility into your systems' behavior, helping you maintain, secure, and optimize your infrastructure and applications.
+
+### 8.2. Introduction to the ELK Stack
+
+The ELK stack is a popular set of open-source tools used for centralized logging:
+
+- Elasticsearch: A distributed search and analytics engine
+- Logstash: A server-side data processing pipeline
+- Kibana: A web interface for searching and visualizing logs
+
+Together, these tools allow you to collect logs from multiple sources, process them, and visualize the data in real-time.
+
+Why use ELK:
+- Scalable and able to handle large volumes of data
+- Flexible and can work with various log formats
+- Provides powerful search and analysis capabilities
+- Offers real-time visualization and dashboarding
+
+### 8.3. Setting Up the ELK Stack
+
+Let's set up a basic ELK stack:
+
+#### 8.3.1 Installing Elasticsearch
+
+1. Add the Elasticsearch GPG key:
+   ```
+   wget -qO - https://artifacts.elastic.co/GPG-KEY-elasticsearch | sudo apt-key add -
    ```
 
-   Use Ansible to install and configure the ELK stack:
-   ```yaml
-   - name: Install Elasticsearch
-     apt:
-       name: elasticsearch
-       state: present
-       update_cache: yes
-
-   - name: Configure Elasticsearch
-     template:
-       src: elasticsearch.yml.j2
-       dest: /etc/elasticsearch/elasticsearch.yml
-     notify: Restart Elasticsearch
-
-   # Similar tasks for Logstash and Kibana
+2. Add the Elasticsearch repository:
+   ```
+   echo "deb https://artifacts.elastic.co/packages/7.x/apt stable main" | sudo tee /etc/apt/sources.list.d/elastic-7.x.list
    ```
 
-2. Configure Filebeat on your application servers to ship logs:
-
-   Install Filebeat:
-   ```yaml
-   - name: Install Filebeat
-     apt:
-       name: filebeat
-       state: present
-       update_cache: yes
-
-   - name: Configure Filebeat
-     template:
-       src: filebeat.yml.j2
-       dest: /etc/filebeat/filebeat.yml
-     notify: Restart Filebeat
+3. Update and install Elasticsearch:
+   ```
+   sudo apt update && sudo apt install elasticsearch
    ```
 
-   Configure Filebeat to ship logs to Logstash:
+4. Start and enable Elasticsearch:
+   ```
+   sudo systemctl start elasticsearch
+   sudo systemctl enable elasticsearch
+   ```
+
+#### 8.3.2 Installing Logstash
+
+1. Install Logstash:
+   ```
+   sudo apt install logstash
+   ```
+
+2. Start and enable Logstash:
+   ```
+   sudo systemctl start logstash
+   sudo systemctl enable logstash
+   ```
+
+#### 8.3.3 Installing Kibana
+
+1. Install Kibana:
+   ```
+   sudo apt install kibana
+   ```
+
+2. Start and enable Kibana:
+   ```
+   sudo systemctl start kibana
+   sudo systemctl enable kibana
+   ```
+
+3. Access Kibana at `http://localhost:5601`
+
+Why it's important: Setting up the ELK stack provides a centralized logging system that can ingest, process, and visualize logs from multiple sources across your infrastructure.
+
+### 8.4. Configuring Logstash
+
+Logstash acts as the data processing pipeline for your logs. Let's create a simple Logstash configuration:
+
+1. Create a configuration file `/etc/logstash/conf.d/logstash.conf`:
+
+```
+input {
+  file {
+    path => "/var/log/syslog"
+    start_position => "beginning"
+  }
+}
+
+filter {
+  grok {
+    match => { "message" => "%{SYSLOGTIMESTAMP:syslog_timestamp} %{SYSLOGHOST:syslog_hostname} %{DATA:syslog_program}(?:\[%{POSINT:syslog_pid}\])?: %{GREEDYDATA:syslog_message}" }
+  }
+  date {
+    match => [ "syslog_timestamp", "MMM  d HH:mm:ss", "MMM dd HH:mm:ss" ]
+  }
+}
+
+output {
+  elasticsearch {
+    hosts => ["localhost:9200"]
+    index => "syslog-%{+YYYY.MM.dd}"
+  }
+  stdout { codec => rubydebug }
+}
+```
+
+This configuration:
+- Reads from the system log file
+- Parses the log entries using a grok pattern
+- Sends the parsed logs to Elasticsearch and stdout
+
+2. Restart Logstash:
+   ```
+   sudo systemctl restart logstash
+   ```
+
+Why it's important: Properly configuring Logstash allows you to ingest, parse, and structure your log data, making it easier to search and analyze in Elasticsearch and Kibana.
+
+### 8.5. Understanding Logstash Grok Patterns
+
+Grok is a powerful feature in Logstash that allows you to parse unstructured log data into structured and queryable fields.
+
+A basic grok pattern looks like this:
+```
+%{PATTERN:field_name}
+```
+
+For example, to parse an IP address and name it "client_ip":
+```
+%{IP:client_ip}
+```
+
+You can chain multiple patterns:
+```
+%{IP:client_ip} %{WORD:method} %{URIPATHPARAM:request}
+```
+
+This would match a log line like: `192.168.0.1 GET /index.html`
+
+Why it's important: Grok patterns allow you to extract meaningful information from your logs, making them more searchable and analyzable.
+
+### 8.6. Creating Kibana Visualizations
+
+Now that we have logs in Elasticsearch, let's visualize them in Kibana:
+
+1. Open Kibana and go to Management > Stack Management > Index Patterns
+2. Create a new index pattern for your logs (e.g., "syslog-*")
+3. Go to Visualize and create a new visualization
+4. Choose a visualization type (e.g., Line chart)
+5. Select your index pattern
+6. Configure the visualization:
+   - For X-axis, choose the date field
+   - For Y-axis, choose Count
+   - Add filters or change the time range as needed
+
+7. Save your visualization and add it to a dashboard
+
+Why it's important: Visualizations help you understand trends and patterns in your log data, making it easier to spot issues or anomalies.
+
+### 8.7. Setting Up Log Shipping with Filebeat
+
+To ship logs from multiple servers to your ELK stack, you can use Filebeat:
+
+1. Install Filebeat on the server you want to collect logs from:
+   ```
+   sudo apt install filebeat
+   ```
+
+2. Configure Filebeat by editing `/etc/filebeat/filebeat.yml`:
    ```yaml
    filebeat.inputs:
    - type: log
      enabled: true
      paths:
-       - /path/to/your/application/logs/*.log
+       - /var/log/*.log
 
    output.logstash:
-     hosts: ["logstash-server:5044"]
+     hosts: ["your-logstash-server:5044"]
    ```
 
-3. Create Logstash filters to parse your application logs:
+3. Start and enable Filebeat:
+   ```
+   sudo systemctl start filebeat
+   sudo systemctl enable filebeat
+   ```
 
-   Create a Logstash configuration file:
+4. Update your Logstash configuration to accept Filebeat input:
    ```
    input {
      beats {
        port => 5044
      }
    }
+   ```
 
-   filter {
-     grok {
-       match => { "message" => "%{TIMESTAMP_ISO8601:timestamp} %{LOGLEVEL:log_level} %{GREEDYDATA:log_message}" }
-     }
-   }
+Why it's important: Using a log shipper like Filebeat allows you to centralize logs from multiple sources, making it easier to manage and analyze logs across your entire infrastructure.
 
-   output {
-     elasticsearch {
-       hosts => ["elasticsearch-server:9200"]
-       index => "application-logs-%{+YYYY.MM.dd}"
-     }
+### 8.8. Implementing Log Rotation
+
+To manage log file sizes and prevent disks from filling up, implement log rotation:
+
+1. Install logrotate if not already present:
+   ```
+   sudo apt install logrotate
+   ```
+
+2. Create a logrotate configuration file for your application logs, e.g., `/etc/logrotate.d/myapp`:
+   ```
+   /var/log/myapp/*.log {
+       daily
+       missingok
+       rotate 14
+       compress
+       delaycompress
+       notifempty
+       create 0640 myapp myapp
+       sharedscripts
+       postrotate
+           /bin/kill -HUP `cat /var/run/myapp.pid 2>/dev/null` 2>/dev/null || true
+       endscript
    }
    ```
 
-4. Set up Kibana dashboards for log visualization and analysis:
-   - Log in to Kibana
-   - Create an index pattern for your application logs
-   - Build visualizations based on log fields (e.g., log levels, timestamps)
-   - Create a dashboard combining these visualizations
+This configuration:
+- Rotates logs daily
+- Keeps 14 days of logs
+- Compresses old logs
+- Creates new log files with specific permissions
+- Sends a HUP signal to the application to reopen log files
 
-For more information on the ELK stack, refer to the [Elastic documentation](https://www.elastic.co/guide/index.html).
+Why it's important: Log rotation prevents log files from consuming too much disk space and helps maintain system performance.
+
+### 8.9. Best Practices for Logging
+
+1. Log at appropriate levels (DEBUG, INFO, WARN, ERROR, etc.)
+2. Include relevant context in log messages (e.g., user ID, request ID)
+3. Use structured logging formats like JSON for easier parsing
+4. Implement log sampling for high-volume logs to reduce storage needs
+5. Secure your logs and control access to sensitive information
+6. Set up alerts for critical log events
+7. Regularly review and analyze your logs
+8. Implement a log retention policy that balances storage costs with compliance requirements
+9. Use correlation IDs to trace requests across multiple services
+
+### 8.10. Advanced ELK Features
+
+As you become more comfortable with the ELK stack, explore these advanced features:
+
+1. Elasticsearch Cluster: Set up multiple Elasticsearch nodes for high availability and better performance
+2. Logstash Plugins: Use various input, filter, and output plugins to extend Logstash functionality
+3. Kibana Dashboards: Create comprehensive dashboards that combine multiple visualizations
+4. Elastic Stack Security: Implement authentication and encryption for your ELK stack
+5. Elastic Stack Monitoring: Use the monitoring features to keep track of your ELK stack's health and performance
+
+
+Effective logging and log analysis are crucial for maintaining and troubleshooting modern applications and infrastructure. The ELK stack provides a powerful, flexible solution for centralized logging, allowing you to collect, process, and analyze logs from various sources.
 
 
 ## 9. Alerting and Communication with Slack
@@ -1517,222 +1983,8 @@ For more information on the ELK stack, refer to the [Elastic documentation](http
 
 For more information on Slack integrations, refer to the [Slack API documentation](https://api.slack.com/docs).
 
-## 10. Security Considerations
 
-1. Implement AWS WAF for web application firewall protection:
-   - Use Terraform to set up AWS WAF:
-     ```hcl
-     resource "aws_wafv2_web_acl" "main" {
-       name        = "managed-rule-set"
-       description = "Managed rule set example."
-       scope       = "REGIONAL"
-
-       default_action {
-         allow {}
-       }
-
-       rule {
-         name     = "rule-1"
-         priority = 1
-
-         override_action {
-           count {}
-         }
-
-         statement {
-           managed_rule_group_statement {
-             name        = "AWSManagedRulesCommonRuleSet"
-             vendor_name = "AWS"
-           }
-         }
-
-         visibility_config {
-           cloudwatch_metrics_enabled = false
-           metric_name                = "friendly-rule-metric-name"
-           sampled_requests_enabled   = false
-         }
-       }
-
-       visibility_config {
-         cloudwatch_metrics_enabled = false
-         metric_name                = "friendly-metric-name"
-         sampled_requests_enabled   = false
-       }
-     }
-     ```
-
-2. Use AWS GuardDuty for threat detection:
-   - Enable GuardDuty in the AWS Console or use Terraform:
-     ```hcl
-     resource "aws_guardduty_detector" "main" {
-       enable = true
-     }
-     ```
-
-3. Regularly update and patch all systems:
-   - Use AWS Systems Manager Patch Manager to automate patching
-   - Create a patch baseline and patch group:
-     ```hcl
-     resource "aws_ssm_patch_baseline" "production" {
-       name             = "production-patch-baseline"
-       operating_system = "AMAZON_LINUX_2"
-
-       approval_rule {
-         approve_after_days = 7
-         compliance_level   = "CRITICAL"
-
-         patch_filter {
-           key    = "PRODUCT"
-           values = ["AmazonLinux2"]
-         }
-
-         patch_filter {
-           key    = "CLASSIFICATION"
-           values = ["Security"]
-         }
-
-         patch_filter {
-           key    = "SEVERITY"
-           values = ["Critical"]
-         }
-       }
-     }
-     ```
-
-4. Implement proper IAM policies and roles:
-   - Use the principle of least privilege
-   - Create specific roles for EC2 instances, Lambda functions, etc.
-   - Example IAM role for EC2:
-     ```hcl
-     resource "aws_iam_role" "ec2_role" {
-       name = "ec2_role"
-
-       assume_role_policy = jsonencode({
-         Version = "2012-10-17"
-         Statement = [
-           {
-             Action = "sts:AssumeRole"
-             Effect = "Allow"
-             Principal = {
-               Service = "ec2.amazonaws.com"
-             }
-           }
-         ]
-       })
-     }
-
-     resource "aws_iam_role_policy_attachment" "ssm_policy" {
-       policy_arn = "arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore"
-       role       = aws_iam_role.ec2_role.name
-     }
-     ```
-
-5. Use AWS KMS for encryption of sensitive data:
-   - Create a KMS key:
-     ```hcl
-     resource "aws_kms_key" "main" {
-       description             = "KMS key for application secrets"
-       deletion_window_in_days = 10
-     }
-     ```
-   - Use the key to encrypt sensitive data in your application
-
-For more information on AWS security best practices, refer to the [AWS Security Documentation](https://docs.aws.amazon.com/security/).
-
-## 11. Backup and Disaster Recovery
-
-1. Set up regular EBS snapshots for EC2 instances:
-   - Use Amazon Data Lifecycle Manager to automate EBS snapshots:
-     ```hcl
-     resource "aws_dlm_lifecycle_policy" "example" {
-       description        = "Example DLM lifecycle policy"
-       execution_role_arn = aws_iam_role.dlm_lifecycle_role.arn
-       state              = "ENABLED"
-
-       policy_details {
-         resource_types = ["VOLUME"]
-
-         schedule {
-           name = "2 weeks of daily snapshots"
-
-           create_rule {
-             interval      = 24
-             interval_unit = "HOURS"
-             times         = ["23:45"]
-           }
-
-           retain_rule {
-             count = 14
-           }
-
-           tags_to_add = {
-             SnapshotCreator = "DLM"
-           }
-
-           copy_tags = false
-         }
-
-         target_tags = {
-           Snapshot = "true"
-         }
-       }
-     }
-     ```
-
-2. Configure RDS automated backups and consider read replicas:
-   - Enable automated backups in your RDS instance configuration:
-     ```hcl
-     resource "aws_db_instance" "default" {
-       # ... other configuration ...
-       backup_retention_period = 7
-       backup_window           = "03:00-04:00"
-     }
-     ```
-   - Create a read replica for improved performance and disaster recovery:
-     ```hcl
-     resource "aws_db_instance" "replica" {
-       identifier     = "myapp-replica"
-       instance_class = "db.t3.micro"
-       replicate_source_db = aws_db_instance.default.identifier
-     }
-     ```
-
-3. Implement a disaster recovery plan:
-   - Consider using AWS Elastic Disaster Recovery (DRS) for critical systems
-   - Set up cross-region replication for S3 buckets:
-     ```hcl
-     resource "aws_s3_bucket" "primary" {
-       bucket = "my-primary-bucket"
-     }
-
-     resource "aws_s3_bucket" "replica" {
-       bucket = "my-replica-bucket"
-       provider = aws.replica_region
-     }
-
-     resource "aws_s3_bucket_replication_configuration" "replication" {
-       role   = aws_iam_role.replication.arn
-       bucket = aws_s3_bucket.primary.id
-
-       rule {
-         id     = "foobar"
-         status = "Enabled"
-
-         destination {
-           bucket        = aws_s3_bucket.replica.arn
-           storage_class = "STANDARD"
-         }
-       }
-     }
-     ```
-
-4. Regularly test your recovery procedures:
-   - Schedule quarterly disaster recovery drills
-   - Document and update your disaster recovery plan based on test results
-
-For more information on AWS backup and disaster recovery, refer to the [AWS Backup Documentation](https://docs.aws.amazon.com/aws-backup/latest/devguide/whatisbackup.html).
-
-## 12. Maintenance and Upgrades
+## 10. Maintenance and Upgrades
 
 1. Implement a strategy for zero-downtime deployments:
    - Use blue-green deployments with your load balancer
