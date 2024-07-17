@@ -12,11 +12,9 @@ This guide provides an in-depth, step-by-step process for setting up and managin
 6. [AWS Cloud Setup](#5-aws-cloud-setup)
 7. [Load Balancing with NLB and Nginx](#6-load-balancing-with-nlb-and-nginx)
 8. [Monitoring with Prometheus and Grafana](#7-monitoring-with-prometheus-and-grafana)
-9. [Logging with ELK Stack](#logging-with-elk-stack)
-10. [Alerting and Communication with Slack](#8-alerting-and-communication-with-slack)
-11. [Security Considerations](#9-security-considerations)
-12. [Backup and Disaster Recovery](#10-backup-and-disaster-recovery)
-13. [Maintenance and Upgrades](#11-maintenance-and-upgrades)
+9. [Logging with ELK Stack](#8.logging-with-elk-stack)
+10. [Alerting and Communication with Slack](#9-alerting-and-communication-with-slack)
+11. [Maintenance and Upgrades](#10-maintenance-and-upgrades)
 
 ## Prerequisites
 
