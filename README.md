@@ -1624,6 +1624,125 @@ Prometheus and Grafana can be configured to send alerts when certain conditions 
 
 Why it's important: Automated alerts ensure that you're immediately notified of potential issues, allowing for quick response and resolution.
 
+
+### 7.10. Application-Specific Monitoring
+
+When monitoring applications, especially APIs, there are several key metrics you should track. Let's go through these with examples and visualizations.
+
+### 7.10.1 Request Rate (Throughput)
+
+The request rate shows how many requests your API is handling over time.
+
+PromQL query:
+```
+sum(rate(http_requests_total[5m])) by (endpoint)
+```
+
+Sample Grafana visualization:
+
+![Screenshot 2024-07-17 at 4 43 01 PM](https://github.com/user-attachments/assets/706d6f43-f4fc-48d2-b8d8-e3c71e45192b)
+
+
+This chart shows the request rate for different API endpoints over time, allowing you to identify usage patterns and potential bottlenecks.
+
+### 7.10.2 Success Rate
+
+The Success rate indicates the percentage of requests are successful. 99.9999 is industry standard.
+
+PromQL query:
+```
+sum(rate(http_requests_total{status=~"5.."}[5m])) by (endpoint) / sum(rate(http_requests_total[5m])) by (endpoint)
+```
+
+Sample Grafana visualization:
+
+![Screenshot 2024-07-17 at 4 50 56 PM](https://github.com/user-attachments/assets/d90c6857-376b-4775-92bf-20fadaf46319)
+![Screenshot 2024-07-17 at 4 51 08 PM](https://github.com/user-attachments/assets/5fed2533-ceae-4ea4-ad69-0f7bb02e0505)
+
+This chart displays the error rate for different API endpoints, helping you quickly identify which endpoints are experiencing the most issues.
+
+### 7.10.3 Latency
+
+Latency measures how long it takes for your API to respond to requests.
+
+PromQL query:
+```
+histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, endpoint))
+```
+
+Sample Grafana visualization:
+
+![Screenshot 2024-07-17 at 4 43 29 PM](https://github.com/user-attachments/assets/96466932-041b-48c4-8de2-ca9410306455)
+![Screenshot 2024-07-17 at 4 43 40 PM](https://github.com/user-attachments/assets/11a7fdb2-f8a3-44c2-86b9-f8d1433ff651)
+
+
+This chart shows the 95th percentile latency for different API endpoints over time, helping you identify performance issues and slow endpoints.
+
+### 7.10.4 Resource Utilization
+
+Monitoring server resources is crucial for understanding your application's performance and capacity needs.
+
+PromQL queries:
+```
+# CPU Usage
+100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100)
+
+# Memory Usage
+(node_memory_MemTotal_bytes - node_memory_MemAvailable_bytes) / node_memory_MemTotal_bytes * 100
+```
+
+![Screenshot 2024-07-17 at 4 44 22 PM](https://github.com/user-attachments/assets/345dbd9d-4f0e-44a5-afe9-b2c3f2962365)
+
+
+This stacked area chart shows CPU, and memory, allowing you to see how resource utilization changes and potentially correlates with application performance.
+
+### 7.10.5 Setting Up Alerts
+
+Based on these metrics, you can set up alerts in Prometheus or Grafana. Here are some example alert rules:
+
+1. High Error Rate:
+```yaml
+- alert: HighErrorRate
+  expr: sum(rate(http_requests_total{status=~"5.."}[5m])) / sum(rate(http_requests_total[5m])) > 0.05
+  for: 5m
+  labels:
+    severity: critical
+  annotations:
+    summary: "High error rate detected"
+    description: "Error rate is above 5% for the last 5 minutes."
+```
+
+2. High Latency:
+```yaml
+- alert: HighLatency
+  expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1
+  for: 5m
+  labels:
+    severity: warning
+  annotations:
+    summary: "High latency detected"
+    description: "95th percentile latency is above 1 second for the last 5 minutes."
+```
+
+3. High CPU Usage:
+```yaml
+- alert: HighCPUUsage
+  expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+  for: 15m
+  labels:
+    severity: warning
+  annotations:
+    summary: "High CPU usage detected"
+    description: "CPU usage is above 80% for the last 15 minutes."
+```
+
+These alerts will help you quickly identify and respond to issues in your application.
+
+Remember, the specific metrics and thresholds you monitor will depend on your application's characteristics and requirements. Regularly review and adjust your monitoring setup as your application evolves and as you gain more insights into its behavior.
+
+</antArtifact>
+
+
 ### 7.10. Best Practices
 
 1. Monitor key performance indicators (KPIs) relevant to your application
